@@ -3,6 +3,7 @@ import { Quiz } from '../models/Quiz.js';
 
 
 // To DO fix softlock si on reponds à la dernière question avec au moins un des questions précédentes non répondus
+// To DO mettre le délai de une seconde sur la denière page répondu avant le end quizz pour voir ce qui était bon ou mauvais
 
 export class QuizController {
     constructor() {
@@ -137,70 +138,25 @@ export class QuizController {
         const selected = [...document.querySelectorAll('#answers button')]
             .find(btn => btn.classList.contains("selected"))?.id;
 
-        const currentIndex = this.quiz.currentQuestionIndex;
-        const isLast = currentIndex === this.quiz.questions.length - 1;
-        const alreadyAnswered = this.quiz.isQuestionAnswered(currentIndex);
+        const alreadyAnswered = this.quiz.isQuestionAnswered(this.quiz.currentQuestionIndex);
 
-        // Soumettre la réponse si elle n'a pas encore été donnée
         if (selected && !alreadyAnswered) {
             this.selectedAnswer = selected;
             this.quiz.submitAnswer(selected);
+
+            if (this.quiz.isComplete()) return this.endQuiz();
+
+            const isLast = this.quiz.currentQuestionIndex === this.quiz.questions.length - 1;
+            if (isLast && this.quiz.isComplete()) return this.endQuiz();
+
+            this.delayedPageChange("next");
+        } else {
+            this.changePageWithAnimation("next");
         }
-
-        const unanswered = this.quiz.getUnansweredQuestions();
-
-        // Si toutes les questions ont été répondues → fin du quiz
-        if (this.quiz.isComplete()) {
-            this.isChangingPage = true;
-            this.animateContainer('next', async () => {
-                await this.endQuiz();
-                this.isChangingPage = false;
-            }, true);
-            return;
-        }
-
-        // Si on est sur la dernière question mais qu'il reste des questions non répondues
-        if (isLast && unanswered.length > 0) {
-            this.isChangingPage = true;
-
-            // Affiche un message d'erreur
-            const msg = unanswered.length > 1
-                ? `Vous n'avez pas répondu aux questions : ${unanswered.map(i => i + 1).join(', ')}`
-                : `Vous n'avez pas répondu à la question : ${unanswered[0] + 1}`;
-            this.showError(msg);
-
-            // Animation de sortie, puis chargement de la question non répondue
-            setTimeout(() => {
-                this.animateContainer('next', () => {
-                    this.quiz.currentQuestionIndex = unanswered[0];
-                    this.quiz.loadQuestion();
-                    this.isChangingPage = false;
-                });
-            }, 1000);
-
-            return;
-        }
-
-        if (isLast && unanswered.length === 0) {
-            this.isChangingPage = true;
-
-            setTimeout(() => {
-                this.animateContainer('next', async () => {
-                    // Vider le contenu pour la "page blanche"
-                    this.sectionQuiz.innerHTML = '';
-                    await this.endQuiz();
-                    this.isChangingPage = false;
-                }, true); // le "true" force la sortie et empêche l'entrée
-                return;
-            }, 300);
-        }
-
-        // Navigation normale
-        this.delayedPageChange("next");
     }
 
     handlePrevClick() {
-    if (this.prev.disabled || this.isChangingPage) return;
+        if (this.next.disabled || this.isChangingPage || this.quiz.currentQuestionIndex === 0) return;
         this.changePageWithAnimation("prev");
     }
 
@@ -305,8 +261,11 @@ async startQuiz(config) {
     this.quiz.playSound("click");
 }
 
-animateContainer(direction = 'next', callback = null, forceExit = false) {
-    if ((direction === 'prev' && this.quiz.currentQuestionIndex === 0) || this.isAnimating) {
+animateContainer(direction = 'next', callback = null) {
+    const isFirst = direction === 'prev' && this.quiz.currentQuestionIndex === 0;
+    const isLast = direction === 'next' && this.quiz.currentQuestionIndex >= this.quiz.questions.length - 1;
+
+    if (isFirst || isLast || this.isAnimating) {
         this.isAnimating = false;
         return;
     }
@@ -317,9 +276,8 @@ animateContainer(direction = 'next', callback = null, forceExit = false) {
     const enterClass = direction === 'next' ? 'enter' : 'enter-reverse';
 
     this.sectionQuiz.classList.remove('enter', 'enter-reverse', 'exit', 'exit-reverse');
-    void this.sectionQuiz.offsetWidth; // Force reflow
+    void this.sectionQuiz.offsetWidth;
 
-    // Animation de sortie
     this.sectionQuiz.classList.add(exitClass);
     this.questionTxt.classList.add('textExit');
     const answerButtons = document.querySelectorAll('#answers button');
@@ -327,31 +285,23 @@ animateContainer(direction = 'next', callback = null, forceExit = false) {
 
     const handleExit = (ev) => {
         if (!ev.animationName.includes('questionExit')) return;
-        this.sectionQuiz.removeEventListener('animationend', handleExit);
 
+        this.sectionQuiz.removeEventListener('animationend', handleExit);
         this.sectionQuiz.classList.remove(exitClass);
         this.questionTxt.classList.remove('textExit');
         answerButtons.forEach(btn => btn.classList.remove('textExit'));
 
-        // Si c’est la dernière question et qu’on force l’animation, on n’ajoute pas l’animation d’entrée
-        const isLast = this.quiz.currentQuestionIndex === this.quiz.questions.length - 1;
-        if (isLast && forceExit) {
-            this.isAnimating = false;
-            if (typeof callback === 'function') callback();
-            return;
-        }
-
-        // Animation d'entrée normale
         void this.sectionQuiz.offsetWidth;
+
         this.sectionQuiz.classList.add(enterClass);
         this.questionTxt.classList.add('textEnter');
         answerButtons.forEach(btn => btn.classList.add('textEnter'));
 
         const handleEnter = (ev2) => {
             if (!ev2.animationName.includes('questionEnter')) return;
-            this.sectionQuiz.removeEventListener('animationend', handleEnter);
 
-            this.sectionQuiz.classList.remove(enterClass);
+            this.sectionQuiz.removeEventListener('animationend', handleEnter);
+            this.sectionQuiz.classList.remove(enterClass);// Lancer l'animation d'entrée
             this.questionTxt.classList.remove('textEnter');
             answerButtons.forEach(btn => btn.classList.remove('textEnter'));
 
@@ -364,7 +314,6 @@ animateContainer(direction = 'next', callback = null, forceExit = false) {
 
     this.sectionQuiz.addEventListener('animationend', handleExit);
 }
-
 
 async checkMinMaxQuestions(categoryId) {
     if (!this.difficulty || !this.nbrQue) {

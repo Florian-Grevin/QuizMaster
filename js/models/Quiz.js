@@ -149,13 +149,6 @@ class Quiz {
             this.results.every(r => r.selectedAnswer !== null && r.selectedAnswer !== undefined);
     }
 
-    // Récuperer les questions non répondu
-    getUnansweredQuestions() {
-        return this.questions
-            .map((q, index) => index)
-            .filter(index => !this.isQuestionAnswered(index));
-    }
-
     changePage(direction) {
         // Vérifier si toutes les questions sont répondues
         switch (direction) {
